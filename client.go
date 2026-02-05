@@ -1,4 +1,4 @@
-package telegram
+package tgbot
 
 import (
 	"bytes"
@@ -59,6 +59,7 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 		payload.DisableNotification = opts.DisableNotification
 		payload.ReplyToMessageID = opts.ReplyToMessageID
 		payload.AllowSendingWithoutReply = opts.AllowSendingWithoutReply
+		payload.ReplyMarkup = opts.ReplyMarkup
 	}
 	return doJSON[Message](ctx, c, "sendMessage", payload)
 }
@@ -85,6 +86,42 @@ func (c *Client) SetWebhook(ctx context.Context, url string) (bool, error) {
 func (c *Client) DeleteWebhook(ctx context.Context, dropPendingUpdates bool) (bool, error) {
 	payload := map[string]bool{"drop_pending_updates": dropPendingUpdates}
 	return doJSON[bool](ctx, c, "deleteWebhook", payload)
+}
+
+// AnswerCallbackQuery answers a callback query from an inline keyboard.
+func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackQueryID string, opts *AnswerCallbackQueryOptions) (bool, error) {
+	payload := answerCallbackQueryPayload{CallbackQueryID: callbackQueryID}
+	if opts != nil {
+		payload.Text = opts.Text
+		payload.ShowAlert = opts.ShowAlert
+	}
+	return doJSON[bool](ctx, c, "answerCallbackQuery", payload)
+}
+
+// EditMessageText edits text of a message.
+func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int64, text string, opts *EditMessageTextOptions) (Message, error) {
+	payload := editMessageTextPayload{
+		ChatID:    chatID,
+		MessageID: messageID,
+		Text:      text,
+	}
+	if opts != nil {
+		payload.ParseMode = opts.ParseMode
+		payload.ReplyMarkup = opts.ReplyMarkup
+	}
+	return doJSON[Message](ctx, c, "editMessageText", payload)
+}
+
+// DeleteMessage deletes a message.
+func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int64) (bool, error) {
+	payload := map[string]int64{"chat_id": chatID, "message_id": messageID}
+	return doJSON[bool](ctx, c, "deleteMessage", payload)
+}
+
+// SetMyCommands sets the bot's command list.
+func (c *Client) SetMyCommands(ctx context.Context, commands []BotCommand) (bool, error) {
+	payload := map[string]any{"commands": commands}
+	return doJSON[bool](ctx, c, "setMyCommands", payload)
 }
 
 // SendPhoto sends a photo. InputFile can be FileID/URL or a new upload.

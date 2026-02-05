@@ -1,4 +1,4 @@
-package telegram
+package tgbot
 
 import "io"
 
@@ -55,8 +55,52 @@ type Message struct {
 
 // Update represents an incoming update.
 type Update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *Message `json:"message"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *Message       `json:"message"`
+	CallbackQuery *CallbackQuery `json:"callback_query"`
+}
+
+// CallbackQuery represents a callback from an inline keyboard button.
+type CallbackQuery struct {
+	ID      string   `json:"id"`
+	From    User     `json:"from"`
+	Message *Message `json:"message"`
+	Data    string   `json:"data"`
+}
+
+// InlineKeyboardMarkup represents an inline keyboard.
+type InlineKeyboardMarkup struct {
+	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
+}
+
+// InlineKeyboardButton represents a button in an inline keyboard.
+type InlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data,omitempty"`
+	URL          string `json:"url,omitempty"`
+}
+
+// ReplyKeyboardMarkup represents a custom keyboard.
+type ReplyKeyboardMarkup struct {
+	Keyboard        [][]KeyboardButton `json:"keyboard"`
+	ResizeKeyboard  bool               `json:"resize_keyboard,omitempty"`
+	OneTimeKeyboard bool               `json:"one_time_keyboard,omitempty"`
+}
+
+// KeyboardButton represents a button in a reply keyboard.
+type KeyboardButton struct {
+	Text string `json:"text"`
+}
+
+// ReplyKeyboardRemove removes the custom keyboard.
+type ReplyKeyboardRemove struct {
+	RemoveKeyboard bool `json:"remove_keyboard"`
+}
+
+// BotCommand represents a bot command.
+type BotCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
 }
 
 type sendMessagePayload struct {
@@ -67,6 +111,7 @@ type sendMessagePayload struct {
 	DisableNotification      bool   `json:"disable_notification,omitempty"`
 	ReplyToMessageID         int64  `json:"reply_to_message_id,omitempty"`
 	AllowSendingWithoutReply bool   `json:"allow_sending_without_reply,omitempty"`
+	ReplyMarkup              any    `json:"reply_markup,omitempty"`
 }
 
 // SendMessageOptions configures SendMessage.
@@ -76,6 +121,7 @@ type SendMessageOptions struct {
 	DisableNotification      bool
 	ReplyToMessageID         int64
 	AllowSendingWithoutReply bool
+	ReplyMarkup              any // InlineKeyboardMarkup, ReplyKeyboardMarkup, or ReplyKeyboardRemove
 }
 
 type getUpdatesPayload struct {
@@ -117,4 +163,30 @@ type sendDocumentPayload struct {
 type SendDocumentOptions struct {
 	Caption   string
 	ParseMode string
+}
+
+type answerCallbackQueryPayload struct {
+	CallbackQueryID string `json:"callback_query_id"`
+	Text            string `json:"text,omitempty"`
+	ShowAlert       bool   `json:"show_alert,omitempty"`
+}
+
+// AnswerCallbackQueryOptions configures AnswerCallbackQuery.
+type AnswerCallbackQueryOptions struct {
+	Text      string
+	ShowAlert bool
+}
+
+type editMessageTextPayload struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int64  `json:"message_id"`
+	Text      string `json:"text"`
+	ParseMode string `json:"parse_mode,omitempty"`
+	ReplyMarkup any  `json:"reply_markup,omitempty"`
+}
+
+// EditMessageTextOptions configures EditMessageText.
+type EditMessageTextOptions struct {
+	ParseMode   string
+	ReplyMarkup *InlineKeyboardMarkup
 }
