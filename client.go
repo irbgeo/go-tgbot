@@ -250,7 +250,7 @@ func doJSON[T any](ctx context.Context, c *Client, method string, payload any) (
 	if err != nil {
 		return zero, fmt.Errorf("telegram: request failed: %w", err)
 	}
-	defer res.Body.Close()
+	defer res.Body.Close() // nolint:errcheck
 
 	var apiRes apiResponse[T]
 	if err := json.NewDecoder(res.Body).Decode(&apiRes); err != nil {
@@ -309,7 +309,7 @@ func doMultipart[T any](ctx context.Context, c *Client, method string, fields ma
 	if err != nil {
 		return zero, fmt.Errorf("telegram: request failed: %w", err)
 	}
-	defer res.Body.Close()
+	defer res.Body.Close() // nolint:errcheck
 
 	var apiRes apiResponse[T]
 	if err := json.NewDecoder(res.Body).Decode(&apiRes); err != nil {

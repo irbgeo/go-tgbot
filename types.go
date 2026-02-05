@@ -178,11 +178,11 @@ type AnswerCallbackQueryOptions struct {
 }
 
 type editMessageTextPayload struct {
-	ChatID    int64  `json:"chat_id"`
-	MessageID int64  `json:"message_id"`
-	Text      string `json:"text"`
-	ParseMode string `json:"parse_mode,omitempty"`
-	ReplyMarkup any  `json:"reply_markup,omitempty"`
+	ChatID      int64  `json:"chat_id"`
+	MessageID   int64  `json:"message_id"`
+	Text        string `json:"text"`
+	ParseMode   string `json:"parse_mode,omitempty"`
+	ReplyMarkup any    `json:"reply_markup,omitempty"`
 }
 
 // EditMessageTextOptions configures EditMessageText.
