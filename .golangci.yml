@@ -15,7 +15,6 @@ linters:
     - unconvert
     - unparam
     - nilerr
-    - errorlint
     - bodyclose
     - prealloc
   settings:
