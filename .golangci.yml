@@ -2,6 +2,8 @@ version: "2"
 
 run:
   timeout: 5m
+  # Do not lint test files (_test.go): keep the linters focused on production code.
+  tests: false
 
 linters:
   enable:
