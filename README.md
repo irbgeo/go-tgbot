@@ -133,6 +133,45 @@ for {
 | `Timeout`        | `int`      | Long polling timeout in seconds.                 |
 | `AllowedUpdates` | `[]string` | Update types you want (e.g. `["message"]`).      |
 
+### Poll helper (recommended)
+
+Writing the polling loop by hand is easy to get wrong. The `Poll` method does it
+for you. It tracks the offset, handles the `429` rate limit, backs off on errors,
+and stops cleanly when the context is cancelled.
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+defer stop()
+
+err := client.Poll(ctx, tgbot.PollOptions{
+	Timeout:        30, // long polling timeout in seconds
+	AllowedUpdates: []string{"message", "callback_query"},
+	OnError: func(err error) {
+		log.Println("poll error:", err)
+	},
+}, func(ctx context.Context, u tgbot.Update) error {
+	log.Printf("update from chat %d", u.ChatID())
+	return nil
+})
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+`Poll` returns `nil` when the context is cancelled, so the code above shuts down
+on Ctrl+C. A handler error does **not** stop the loop — it is only reported
+through `OnError`.
+
+`PollOptions` fields:
+
+| Field            | Type            | Meaning                                              |
+|------------------|-----------------|------------------------------------------------------|
+| `Timeout`        | `int`           | Long polling timeout in seconds. Default `10`. Keep it below the HTTP client timeout. |
+| `Limit`          | `int`           | Max updates per call (`0` = server default).         |
+| `AllowedUpdates` | `[]string`      | Update types you want (`nil` = all but `chat_member`). |
+| `Backoff`        | `time.Duration` | Pause after a transient error. Default `3s`.         |
+| `OnError`        | `func(error)`   | Called on a non-fatal error. The loop keeps running. |
+
 ### Webhooks
 
 Tell Telegram to send updates to your URL.
@@ -164,6 +203,45 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 Note: use **either** polling **or** a webhook, not both.
 
+### Reading an update
+
+An `Update` can hold a message or a callback query. Instead of checking the
+nested fields by hand, use these helper methods. They work for both kinds and
+return `0` or `false` when the value is not present.
+
+```go
+func handle(ctx context.Context, u tgbot.Update) error {
+	chatID := u.ChatID()     // chat the update belongs to
+	userID := u.SenderID()   // user who sent it or tapped the button
+
+	// Command() strips the leading slash, the "@botname" part, and arguments.
+	if cmd, ok := u.Command(); ok {
+		switch cmd {
+		case "start":
+			_, err := client.SendMessage(ctx, chatID, "Welcome!", nil)
+			return err
+		case "help":
+			_, err := client.SendMessage(ctx, chatID, "Send me any text.", nil)
+			return err
+		}
+	}
+
+	if u.CallbackQuery != nil {
+		// Acknowledge the tap so the button stops its loading spinner.
+		_, _ = client.AnswerCallback(ctx, u.CallbackQuery.ID)
+	}
+
+	log.Printf("update from user %d in chat %d", userID, chatID)
+	return nil
+}
+```
+
+| Method       | Returns          | Meaning                                                |
+|--------------|------------------|--------------------------------------------------------|
+| `ChatID()`   | `int64`          | Chat ID of the message or the callback's message.      |
+| `SenderID()` | `int64`          | User ID of the sender or the button presser.           |
+| `Command()`  | `(string, bool)` | Bot command without `/`, `@botname`, or arguments.     |
+
 ## Sending messages
 
 ```go
@@ -174,12 +252,15 @@ To change the behavior, pass `*SendMessageOptions`:
 
 ```go
 msg, err := client.SendMessage(ctx, chatID, "*Bold* text", &tgbot.SendMessageOptions{
-	ParseMode:             "MarkdownV2",
+	ParseMode:             tgbot.ParseModeMarkdownV2,
 	DisableWebPagePreview:  true,
 	DisableNotification:    true,
 	ReplyToMessageID:       someMessageID,
 })
 ```
+
+For the parse mode you can pass a plain string or use one of the constants:
+`tgbot.ParseModeHTML`, `tgbot.ParseModeMarkdownV2`, `tgbot.ParseModeMarkdown`.
 
 `SendMessageOptions` fields:
 
@@ -213,50 +294,73 @@ ok, err := client.DeleteMessage(ctx, chatID, messageID)
 
 Buttons under the message. They send a callback or open a URL.
 
+The library gives you small builder functions so you do not have to write the
+nested slices by hand:
+
+- `tgbot.Button(text, data)` — a button that sends `data` as a callback.
+- `tgbot.URLButton(text, url)` — a button that opens a URL.
+- `tgbot.Row(buttons...)` — one row of buttons.
+- `tgbot.InlineKeyboard(rows...)` — the full markup. Returns `nil` when you pass
+  no rows, so you can use it for a "no keyboard" case too.
+
 ```go
-kb := tgbot.InlineKeyboardMarkup{
-	InlineKeyboard: [][]tgbot.InlineKeyboardButton{
-		{
-			{Text: "Yes", CallbackData: "vote_yes"},
-			{Text: "No", CallbackData: "vote_no"},
-		},
-		{
-			{Text: "Open site", URL: "https://example.com"},
-		},
-	},
-}
+kb := tgbot.InlineKeyboard(
+	tgbot.Row(
+		tgbot.Button("Yes", "vote_yes"),
+		tgbot.Button("No", "vote_no"),
+	),
+	tgbot.Row(
+		tgbot.URLButton("Open site", "https://example.com"),
+	),
+)
 
 _, err := client.SendMessage(ctx, chatID, "Do you agree?", &tgbot.SendMessageOptions{
 	ReplyMarkup: kb,
 })
 ```
 
+The builders are optional. You can still build `tgbot.InlineKeyboardMarkup` by
+hand if you prefer.
+
 When the user taps an inline button, you get an `Update` with a
 `CallbackQuery`. You should answer it, or the button keeps a loading state.
 
 ```go
-ok, err := client.AnswerCallbackQuery(ctx, query.ID, &tgbot.AnswerCallbackQueryOptions{
+// Full control:
+_, err := client.AnswerCallbackQuery(ctx, query.ID, &tgbot.AnswerCallbackQueryOptions{
 	Text:      "Thanks for your vote!",
 	ShowAlert: false, // true shows a popup instead of a small toast
 })
+
+// Or just dismiss the spinner (the common case):
+_, err = client.AnswerCallback(ctx, query.ID)
 ```
 
 ### Reply keyboard
 
-A custom keyboard that replaces the normal keyboard.
+A custom keyboard that replaces the normal keyboard. It has its own builders:
+
+- `tgbot.TextButton(text)` — a button that sends its text back as a message.
+- `tgbot.ReplyRow(buttons...)` — one row of buttons.
+- `tgbot.ReplyKeyboard(rows...)` — the full markup. Returns `nil` for no rows.
 
 ```go
-kb := tgbot.ReplyKeyboardMarkup{
-	Keyboard: [][]tgbot.KeyboardButton{
-		{{Text: "Help"}, {Text: "Settings"}},
-	},
-	ResizeKeyboard:  true,
-	OneTimeKeyboard: true,
-}
+kb := tgbot.ReplyKeyboard(
+	tgbot.ReplyRow(tgbot.TextButton("Help"), tgbot.TextButton("Settings")),
+	tgbot.ReplyRow(tgbot.TextButton("Menu")),
+)
 
 _, err := client.SendMessage(ctx, chatID, "Choose:", &tgbot.SendMessageOptions{
 	ReplyMarkup: kb,
 })
+```
+
+`ReplyKeyboard` does not set the extra flags. If you need them, set them on the
+returned value or build the struct by hand:
+
+```go
+kb.ResizeKeyboard = true
+kb.OneTimeKeyboard = true
 ```
 
 ### Remove a reply keyboard
@@ -343,13 +447,32 @@ if err != nil {
 		log.Printf("telegram error %d: %s", apiErr.Code, apiErr.Description)
 
 		// Rate limit: Telegram asks you to wait.
-		if apiErr.Parameters != nil && apiErr.Parameters.RetryAfter > 0 {
-			time.Sleep(time.Duration(apiErr.Parameters.RetryAfter) * time.Second)
+		if d, ok := apiErr.RetryAfter(); ok {
+			time.Sleep(d)
 		}
 		return
 	}
 	// Other errors: network, JSON, context, etc.
 	log.Println("request failed:", err)
+}
+```
+
+`*APIError` has helper methods for the common cases, so you do not have to match
+on codes or text yourself:
+
+| Method            | Returns              | Meaning                                                        |
+|-------------------|----------------------|----------------------------------------------------------------|
+| `IsForbidden()`   | `bool`               | HTTP `403`. In a private chat the user blocked the bot.        |
+| `IsNotModified()` | `bool`               | An `EditMessage*` call changed nothing. Safe to treat as OK.   |
+| `RetryAfter()`    | `(time.Duration, bool)` | How long to wait after a `429`. `false` when there is no hint. |
+
+All three are safe to call on a `nil` `*APIError`. Example:
+
+```go
+_, err := client.EditMessageText(ctx, chatID, messageID, text, nil)
+var apiErr *tgbot.APIError
+if errors.As(err, &apiErr) && apiErr.IsNotModified() {
+	err = nil // the text was already the same
 }
 ```
 
@@ -369,12 +492,27 @@ if err != nil {
 | `EditMessageText`     | Edit the text of a message.                   |
 | `DeleteMessage`       | Delete a message.                             |
 | `GetUpdates`          | Poll for new updates (long polling).          |
+| `Poll`                | Run the polling loop for you (offset, backoff, rate limit). |
 | `SetWebhook`          | Set the webhook URL.                          |
 | `DeleteWebhook`       | Remove the webhook.                           |
 | `AnswerCallbackQuery` | Answer an inline button tap.                  |
+| `AnswerCallback`      | Answer a button tap with no popup (shortcut). |
 | `SendPhoto`           | Send a photo.                                 |
 | `SendDocument`        | Send a document.                              |
 | `SetMyCommands`       | Set the bot's command list.                   |
+
+### Helper functions and methods
+
+| Helper                                    | What it does                                        |
+|-------------------------------------------|-----------------------------------------------------|
+| `Button` / `URLButton`                    | Build one inline button (callback or URL).          |
+| `Row` / `InlineKeyboard`                  | Build inline keyboard rows and markup.              |
+| `TextButton`                              | Build one reply keyboard button.                    |
+| `ReplyRow` / `ReplyKeyboard`              | Build reply keyboard rows and markup.               |
+| `Update.ChatID` / `.SenderID`             | Read the chat and user IDs from any update.         |
+| `Update.Command`                          | Read the bot command from a message.                |
+| `APIError.IsForbidden` / `.IsNotModified` | Check common API error cases.                        |
+| `APIError.RetryAfter`                     | Read the `429` wait time.                            |
 
 ## License
 
