@@ -48,6 +48,25 @@ func TestUpdateAccessors(t *testing.T) {
 	require.Zero(t, (Update{}).ChatID(), "empty update should be 0")
 }
 
+func TestCallbackQueryAccessors(t *testing.T) {
+	cb := &CallbackQuery{From: User{ID: 9}, Message: &Message{MessageID: 42, Chat: Chat{ID: 5}}, Data: "x"}
+	require.Equal(t, int64(9), cb.SenderID())
+	require.Equal(t, int64(5), cb.ChatID())
+	require.Equal(t, int64(42), cb.MessageID())
+
+	// No attached message: sender is still known, chat/message are 0.
+	noMsg := &CallbackQuery{From: User{ID: 9}}
+	require.Equal(t, int64(9), noMsg.SenderID())
+	require.Zero(t, noMsg.ChatID())
+	require.Zero(t, noMsg.MessageID())
+
+	// Nil-safe.
+	var nilCb *CallbackQuery
+	require.Zero(t, nilCb.SenderID())
+	require.Zero(t, nilCb.ChatID())
+	require.Zero(t, nilCb.MessageID())
+}
+
 func TestCommand(t *testing.T) {
 	tests := []struct {
 		text  string

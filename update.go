@@ -7,7 +7,7 @@ import "strings"
 func (s Update) SenderID() int64 {
 	switch {
 	case s.CallbackQuery != nil:
-		return s.CallbackQuery.From.ID
+		return s.CallbackQuery.SenderID()
 	case s.Message != nil && s.Message.From != nil:
 		return s.Message.From.ID
 	}
@@ -17,13 +17,37 @@ func (s Update) SenderID() int64 {
 // ChatID returns the chat the update belongs to (the message chat, or the chat
 // of the message an inline button is attached to), or 0 when unknown.
 func (s Update) ChatID() int64 {
-	switch {
-	case s.Message != nil:
+	if s.Message != nil {
 		return s.Message.Chat.ID
-	case s.CallbackQuery != nil && s.CallbackQuery.Message != nil:
-		return s.CallbackQuery.Message.Chat.ID
 	}
-	return 0
+	return s.CallbackQuery.ChatID() // nil-safe
+}
+
+// SenderID returns the user id of the tutor who pressed the inline button, or 0
+// when unknown.
+func (s *CallbackQuery) SenderID() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.From.ID
+}
+
+// ChatID returns the chat id of the message the button is attached to, or 0
+// when the callback carries no message.
+func (s *CallbackQuery) ChatID() int64 {
+	if s == nil || s.Message == nil {
+		return 0
+	}
+	return s.Message.Chat.ID
+}
+
+// MessageID returns the id of the message the button is attached to (used to
+// edit it in place), or 0 when the callback carries no message.
+func (s *CallbackQuery) MessageID() int64 {
+	if s == nil || s.Message == nil {
+		return 0
+	}
+	return s.Message.MessageID
 }
 
 // Command returns the bot command in a message without the leading slash (and
