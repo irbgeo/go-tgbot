@@ -3,39 +3,49 @@ package tgbot
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestKeyboard(t *testing.T) {
-	if Keyboard() != nil {
-		t.Fatalf("Keyboard() with no rows should be nil")
-	}
-	kb := Keyboard(
+	require.Nil(t, InlineKeyboard(), "Keyboard() with no rows should be nil")
+
+	kb := InlineKeyboard(
 		Row(Button("Yes", "y"), Button("No", "n")),
 		Row(URLButton("Open", "https://example.com")),
 	)
-	if kb == nil || len(kb.InlineKeyboard) != 2 {
-		t.Fatalf("expected 2 rows, got %+v", kb)
-	}
-	if kb.InlineKeyboard[0][0].Text != "Yes" || kb.InlineKeyboard[0][0].CallbackData != "y" {
-		t.Fatalf("button 0 wrong: %+v", kb.InlineKeyboard[0][0])
-	}
-	if kb.InlineKeyboard[1][0].URL != "https://example.com" {
-		t.Fatalf("url button wrong: %+v", kb.InlineKeyboard[1][0])
-	}
+	require.NotNil(t, kb)
+	require.Len(t, kb.InlineKeyboard, 2)
+	require.Equal(t, "Yes", kb.InlineKeyboard[0][0].Text)
+	require.Equal(t, "y", kb.InlineKeyboard[0][0].CallbackData)
+	require.Equal(t, "https://example.com", kb.InlineKeyboard[1][0].URL)
+}
+
+func TestReplyKeyboard(t *testing.T) {
+	require.Nil(t, ReplyKeyboard(), "ReplyKeyboard() with no rows should be nil")
+
+	kb := ReplyKeyboard(
+		ReplyRow(TextButton("Yes"), TextButton("No")),
+		ReplyRow(TextButton("Menu")),
+	)
+	require.NotNil(t, kb)
+	require.Len(t, kb.Keyboard, 2)
+	require.Equal(t, "Yes", kb.Keyboard[0][0].Text)
+	require.Equal(t, "No", kb.Keyboard[0][1].Text)
+	require.Equal(t, "Menu", kb.Keyboard[1][0].Text)
 }
 
 func TestUpdateAccessors(t *testing.T) {
 	msg := Update{Message: &Message{Chat: Chat{ID: 5}, From: &User{ID: 7}, Text: "hi"}}
-	if msg.SenderID() != 7 || msg.ChatID() != 5 {
-		t.Fatalf("message accessors: sender=%d chat=%d", msg.SenderID(), msg.ChatID())
-	}
+	require.Equal(t, int64(7), msg.SenderID())
+	require.Equal(t, int64(5), msg.ChatID())
+
 	cb := Update{CallbackQuery: &CallbackQuery{From: User{ID: 9}, Message: &Message{Chat: Chat{ID: 5}}, Data: "x"}}
-	if cb.SenderID() != 9 || cb.ChatID() != 5 {
-		t.Fatalf("callback accessors: sender=%d chat=%d", cb.SenderID(), cb.ChatID())
-	}
-	if (Update{}).SenderID() != 0 || (Update{}).ChatID() != 0 {
-		t.Fatalf("empty update should be 0/0")
-	}
+	require.Equal(t, int64(9), cb.SenderID())
+	require.Equal(t, int64(5), cb.ChatID())
+
+	require.Zero(t, (Update{}).SenderID(), "empty update should be 0")
+	require.Zero(t, (Update{}).ChatID(), "empty update should be 0")
 }
 
 func TestCommand(t *testing.T) {
@@ -54,35 +64,27 @@ func TestCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got, ok := Update{Message: &Message{Text: tt.text}}.Command()
-		if got != tt.want || ok != tt.isCmd {
-			t.Errorf("Command(%q) = (%q,%v), want (%q,%v)", tt.text, got, ok, tt.want, tt.isCmd)
-		}
+		require.Equal(t, tt.want, got, "Command(%q) text", tt.text)
+		require.Equal(t, tt.isCmd, ok, "Command(%q) isCmd", tt.text)
 	}
-	if _, ok := (Update{}).Command(); ok {
-		t.Errorf("non-message update should not be a command")
-	}
+	_, ok := (Update{}).Command()
+	require.False(t, ok, "non-message update should not be a command")
 }
 
 func TestAPIErrorHelpers(t *testing.T) {
-	if !(&APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"}).IsForbidden() {
-		t.Errorf("403 should be forbidden")
-	}
-	if (&APIError{Code: 400}).IsForbidden() {
-		t.Errorf("400 should not be forbidden")
-	}
-	if !(&APIError{Code: 400, Description: "Bad Request: message is not modified"}).IsNotModified() {
-		t.Errorf("should detect not-modified")
-	}
+	require.True(t, (&APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"}).IsForbidden(), "403 should be forbidden")
+	require.False(t, (&APIError{Code: 400}).IsForbidden(), "400 should not be forbidden")
+	require.True(t, (&APIError{Code: 400, Description: "Bad Request: message is not modified"}).IsNotModified(), "should detect not-modified")
+
 	d, ok := (&APIError{Code: 429, Parameters: &ResponseParameters{RetryAfter: 5}}).RetryAfter()
-	if !ok || d != 5*time.Second {
-		t.Errorf("RetryAfter = (%s,%v), want (5s,true)", d, ok)
-	}
-	if _, ok := (&APIError{Code: 500}).RetryAfter(); ok {
-		t.Errorf("no retry hint should be false")
-	}
+	require.True(t, ok)
+	require.Equal(t, 5*time.Second, d)
+
+	_, ok = (&APIError{Code: 500}).RetryAfter()
+	require.False(t, ok, "no retry hint should be false")
+
 	// Nil-safe.
 	var e *APIError
-	if e.IsForbidden() || e.IsNotModified() {
-		t.Errorf("nil APIError helpers should be false")
-	}
+	require.False(t, e.IsForbidden(), "nil APIError helpers should be false")
+	require.False(t, e.IsNotModified(), "nil APIError helpers should be false")
 }

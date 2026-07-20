@@ -46,12 +46,12 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 }
 
 // GetMe returns the bot's user info.
-func (c *Client) GetMe(ctx context.Context) (User, error) {
-	return doJSON[User](ctx, c, "getMe", struct{}{})
+func (s *Client) GetMe(ctx context.Context) (User, error) {
+	return doJSON[User](ctx, s, "getMe", struct{}{})
 }
 
 // SendMessage sends a text message.
-func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opts *SendMessageOptions) (Message, error) {
+func (s *Client) SendMessage(ctx context.Context, chatID int64, text string, opts *SendMessageOptions) (Message, error) {
 	payload := sendMessagePayload{ChatID: chatID, Text: text}
 	if opts != nil {
 		payload.ParseMode = opts.ParseMode
@@ -61,11 +61,11 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, opt
 		payload.AllowSendingWithoutReply = opts.AllowSendingWithoutReply
 		payload.ReplyMarkup = opts.ReplyMarkup
 	}
-	return doJSON[Message](ctx, c, "sendMessage", payload)
+	return doJSON[Message](ctx, s, "sendMessage", payload)
 }
 
 // GetUpdates polls for incoming updates (long polling).
-func (c *Client) GetUpdates(ctx context.Context, opts *GetUpdatesOptions) ([]Update, error) {
+func (s *Client) GetUpdates(ctx context.Context, opts *GetUpdatesOptions) ([]Update, error) {
 	payload := getUpdatesPayload{}
 	if opts != nil {
 		payload.Offset = opts.Offset
@@ -73,33 +73,33 @@ func (c *Client) GetUpdates(ctx context.Context, opts *GetUpdatesOptions) ([]Upd
 		payload.Timeout = opts.Timeout
 		payload.AllowedUpdates = opts.AllowedUpdates
 	}
-	return doJSON[[]Update](ctx, c, "getUpdates", payload)
+	return doJSON[[]Update](ctx, s, "getUpdates", payload)
 }
 
 // SetWebhook configures webhook URL.
-func (c *Client) SetWebhook(ctx context.Context, url string) (bool, error) {
+func (s *Client) SetWebhook(ctx context.Context, url string) (bool, error) {
 	payload := map[string]string{"url": url}
-	return doJSON[bool](ctx, c, "setWebhook", payload)
+	return doJSON[bool](ctx, s, "setWebhook", payload)
 }
 
 // DeleteWebhook removes webhook and returns status.
-func (c *Client) DeleteWebhook(ctx context.Context, dropPendingUpdates bool) (bool, error) {
+func (s *Client) DeleteWebhook(ctx context.Context, dropPendingUpdates bool) (bool, error) {
 	payload := map[string]bool{"drop_pending_updates": dropPendingUpdates}
-	return doJSON[bool](ctx, c, "deleteWebhook", payload)
+	return doJSON[bool](ctx, s, "deleteWebhook", payload)
 }
 
 // AnswerCallbackQuery answers a callback query from an inline keyboard.
-func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackQueryID string, opts *AnswerCallbackQueryOptions) (bool, error) {
+func (s *Client) AnswerCallbackQuery(ctx context.Context, callbackQueryID string, opts *AnswerCallbackQueryOptions) (bool, error) {
 	payload := answerCallbackQueryPayload{CallbackQueryID: callbackQueryID}
 	if opts != nil {
 		payload.Text = opts.Text
 		payload.ShowAlert = opts.ShowAlert
 	}
-	return doJSON[bool](ctx, c, "answerCallbackQuery", payload)
+	return doJSON[bool](ctx, s, "answerCallbackQuery", payload)
 }
 
 // EditMessageText edits text of a message.
-func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int64, text string, opts *EditMessageTextOptions) (Message, error) {
+func (s *Client) EditMessageText(ctx context.Context, chatID int64, messageID int64, text string, opts *EditMessageTextOptions) (Message, error) {
 	payload := editMessageTextPayload{
 		ChatID:    chatID,
 		MessageID: messageID,
@@ -109,23 +109,23 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 		payload.ParseMode = opts.ParseMode
 		payload.ReplyMarkup = opts.ReplyMarkup
 	}
-	return doJSON[Message](ctx, c, "editMessageText", payload)
+	return doJSON[Message](ctx, s, "editMessageText", payload)
 }
 
 // DeleteMessage deletes a message.
-func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int64) (bool, error) {
+func (s *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int64) (bool, error) {
 	payload := map[string]int64{"chat_id": chatID, "message_id": messageID}
-	return doJSON[bool](ctx, c, "deleteMessage", payload)
+	return doJSON[bool](ctx, s, "deleteMessage", payload)
 }
 
 // SetMyCommands sets the bot's command list.
-func (c *Client) SetMyCommands(ctx context.Context, commands []BotCommand) (bool, error) {
+func (s *Client) SetMyCommands(ctx context.Context, commands []BotCommand) (bool, error) {
 	payload := map[string]any{"commands": commands}
-	return doJSON[bool](ctx, c, "setMyCommands", payload)
+	return doJSON[bool](ctx, s, "setMyCommands", payload)
 }
 
 // SendPhoto sends a photo. InputFile can be FileID/URL or a new upload.
-func (c *Client) SendPhoto(ctx context.Context, chatID int64, photo InputFile, opts *SendPhotoOptions) (Message, error) {
+func (s *Client) SendPhoto(ctx context.Context, chatID int64, photo InputFile, opts *SendPhotoOptions) (Message, error) {
 	if photo.Reader != nil {
 		fields := map[string]string{
 			"chat_id": fmt.Sprintf("%d", chatID),
@@ -143,7 +143,7 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, photo InputFile, o
 			Reader:   photo.Reader,
 			Filename: photo.Filename,
 		}}
-		return doMultipart[Message](ctx, c, "sendPhoto", fields, files)
+		return doMultipart[Message](ctx, s, "sendPhoto", fields, files)
 	}
 	if photo.String() == "" {
 		return Message{}, errors.New("telegram: photo file_id or URL is required")
@@ -156,11 +156,11 @@ func (c *Client) SendPhoto(ctx context.Context, chatID int64, photo InputFile, o
 		payload.Caption = opts.Caption
 		payload.ParseMode = opts.ParseMode
 	}
-	return doJSON[Message](ctx, c, "sendPhoto", payload)
+	return doJSON[Message](ctx, s, "sendPhoto", payload)
 }
 
 // SendDocument sends a document. InputFile can be FileID/URL or a new upload.
-func (c *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, opts *SendDocumentOptions) (Message, error) {
+func (s *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, opts *SendDocumentOptions) (Message, error) {
 	if doc.Reader != nil {
 		fields := map[string]string{
 			"chat_id": fmt.Sprintf("%d", chatID),
@@ -178,7 +178,7 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, 
 			Reader:   doc.Reader,
 			Filename: doc.Filename,
 		}}
-		return doMultipart[Message](ctx, c, "sendDocument", fields, files)
+		return doMultipart[Message](ctx, s, "sendDocument", fields, files)
 	}
 	if doc.String() == "" {
 		return Message{}, errors.New("telegram: document file_id or URL is required")
@@ -191,18 +191,18 @@ func (c *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, 
 		payload.Caption = opts.Caption
 		payload.ParseMode = opts.ParseMode
 	}
-	return doJSON[Message](ctx, c, "sendDocument", payload)
+	return doJSON[Message](ctx, s, "sendDocument", payload)
 }
 
-func (c *Client) endpoint(method string) (string, error) {
-	if c.baseURL == "" {
+func (s *Client) endpoint(method string) (string, error) {
+	if s.baseURL == "" {
 		return "", errors.New("telegram: baseURL is empty")
 	}
-	u, err := url.Parse(c.baseURL)
+	u, err := url.Parse(s.baseURL)
 	if err != nil {
 		return "", fmt.Errorf("telegram: invalid baseURL: %w", err)
 	}
-	u.Path = path.Join(u.Path, "bot"+c.token, method)
+	u.Path = path.Join(u.Path, "bot"+s.token, method)
 	return u.String(), nil
 }
 
@@ -221,14 +221,14 @@ type APIError struct {
 	Parameters  *ResponseParameters
 }
 
-func (e *APIError) Error() string {
-	if e == nil {
+func (s *APIError) Error() string {
+	if s == nil {
 		return "telegram: API error"
 	}
-	if e.Code == 0 {
-		return fmt.Sprintf("telegram: %s", e.Description)
+	if s.Code == 0 {
+		return fmt.Sprintf("telegram: %s", s.Description)
 	}
-	return fmt.Sprintf("telegram: %d %s", e.Code, e.Description)
+	return fmt.Sprintf("telegram: %d %s", s.Code, s.Description)
 }
 
 func doJSON[T any](ctx context.Context, c *Client, method string, payload any) (T, error) {

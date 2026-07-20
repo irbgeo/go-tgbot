@@ -27,7 +27,7 @@ type PollOptions struct {
 // update offset itself. It honors Telegram's RetryAfter (429), backs off on
 // transient errors, and returns nil when ctx is cancelled. A handler error
 // does not stop the loop (it is reported via OnError).
-func (c *Client) Poll(ctx context.Context, o PollOptions, handle func(context.Context, Update) error) error {
+func (s *Client) Poll(ctx context.Context, o PollOptions, handle func(context.Context, Update) error) error {
 	timeout := o.Timeout
 	if timeout == 0 {
 		timeout = 10
@@ -44,7 +44,7 @@ func (c *Client) Poll(ctx context.Context, o PollOptions, handle func(context.Co
 			return nil
 		default:
 		}
-		updates, err := c.GetUpdates(ctx, &GetUpdatesOptions{
+		updates, err := s.GetUpdates(ctx, &GetUpdatesOptions{
 			Offset:         offset,
 			Limit:          o.Limit,
 			Timeout:        timeout,

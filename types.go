@@ -16,11 +16,11 @@ type InputFile struct {
 	Filename string
 }
 
-func (f InputFile) String() string {
-	if f.FileID != "" {
-		return f.FileID
+func (s InputFile) String() string {
+	if s.FileID != "" {
+		return s.FileID
 	}
-	return f.URL
+	return s.URL
 }
 
 // User represents a Telegram user or bot.
