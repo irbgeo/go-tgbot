@@ -194,6 +194,53 @@ func (s *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, 
 	return doJSON[Message](ctx, s, "sendDocument", payload)
 }
 
+// GetFile resolves a file_id to a short-lived download path — the first of
+// Telegram's two steps to retrieve a file (see DownloadFile for the second).
+func (s *Client) GetFile(ctx context.Context, fileID string) (string, error) {
+	payload := map[string]string{"file_id": fileID}
+	file, err := doJSON[File](ctx, s, "getFile", payload)
+	if err != nil {
+		return "", err
+	}
+	return file.FilePath, nil
+}
+
+// DownloadFile fetches a file's raw bytes given the path GetFile returned.
+// Unlike every other Client method, this is a plain GET against the file
+// host (api.telegram.org/file/bot<token>/...), not the Bot API host — so it
+// does not go through doJSON.
+func (s *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, error) {
+	endpoint, err := s.fileEndpoint(filePath)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: new request: %w", err)
+	}
+	res, err := s.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("telegram: request failed: %w", err)
+	}
+	defer res.Body.Close() // nolint:errcheck
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("telegram: download file: status %d", res.StatusCode)
+	}
+	return io.ReadAll(res.Body)
+}
+
+func (s *Client) fileEndpoint(filePath string) (string, error) {
+	if s.baseURL == "" {
+		return "", errors.New("telegram: baseURL is empty")
+	}
+	u, err := url.Parse(s.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("telegram: invalid baseURL: %w", err)
+	}
+	u.Path = path.Join(u.Path, "file", "bot"+s.token, filePath)
+	return u.String(), nil
+}
+
 func (s *Client) endpoint(method string) (string, error) {
 	if s.baseURL == "" {
 		return "", errors.New("telegram: baseURL is empty")

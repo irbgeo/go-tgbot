@@ -45,12 +45,29 @@ type Chat struct {
 
 // Message represents a Telegram message.
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	Date      int64  `json:"date"`
-	Chat      Chat   `json:"chat"`
-	From      *User  `json:"from"`
-	Text      string `json:"text"`
-	Caption   string `json:"caption"`
+	MessageID int64     `json:"message_id"`
+	Date      int64     `json:"date"`
+	Chat      Chat      `json:"chat"`
+	From      *User     `json:"from"`
+	Text      string    `json:"text"`
+	Caption   string    `json:"caption"`
+	Document  *Document `json:"document"`
+}
+
+// Document describes a file attached to a message.
+type Document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+}
+
+// File is Telegram's file metadata, returned by GetFile. FilePath is only
+// valid for a short time and must be downloaded promptly (DownloadFile).
+type File struct {
+	FileID   string `json:"file_id"`
+	FilePath string `json:"file_path"`
+	FileSize int64  `json:"file_size"`
 }
 
 // Update represents an incoming update.
