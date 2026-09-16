@@ -17,6 +17,12 @@ import (
 
 const defaultBase = "https://api.telegram.org"
 
+// maxDownloadSize is Telegram's own documented Bot API ceiling for files a
+// bot can download. DownloadFile enforces this on the actual response body,
+// independent of any file_size the caller was told beforehand — Telegram
+// marks Document.file_size optional, so it cannot be trusted as a hard cap.
+const maxDownloadSize = 20 * 1024 * 1024
+
 // Client wraps Telegram Bot API calls.
 type Client struct {
 	token   string
@@ -226,22 +232,29 @@ func (s *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, err
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("telegram: download file: status %d", res.StatusCode)
 	}
-	return io.ReadAll(res.Body)
+
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxDownloadSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("telegram: read file: %w", err)
+	}
+	if len(data) > maxDownloadSize {
+		return nil, fmt.Errorf("telegram: file exceeds %d bytes", maxDownloadSize)
+	}
+	return data, nil
 }
 
 func (s *Client) fileEndpoint(filePath string) (string, error) {
-	if s.baseURL == "" {
-		return "", errors.New("telegram: baseURL is empty")
-	}
-	u, err := url.Parse(s.baseURL)
-	if err != nil {
-		return "", fmt.Errorf("telegram: invalid baseURL: %w", err)
-	}
-	u.Path = path.Join(u.Path, "file", "bot"+s.token, filePath)
-	return u.String(), nil
+	return s.buildURL("file", "bot"+s.token, filePath)
 }
 
 func (s *Client) endpoint(method string) (string, error) {
+	return s.buildURL("bot"+s.token, method)
+}
+
+// buildURL joins segments onto baseURL's path — shared by endpoint (the Bot
+// API host) and fileEndpoint (the file-download host), which differ only in
+// which segments they join.
+func (s *Client) buildURL(segments ...string) (string, error) {
 	if s.baseURL == "" {
 		return "", errors.New("telegram: baseURL is empty")
 	}
@@ -249,7 +262,7 @@ func (s *Client) endpoint(method string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("telegram: invalid baseURL: %w", err)
 	}
-	u.Path = path.Join(u.Path, "bot"+s.token, method)
+	u.Path = path.Join(append([]string{u.Path}, segments...)...)
 	return u.String(), nil
 }
 

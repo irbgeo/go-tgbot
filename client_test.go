@@ -1,6 +1,7 @@
 package tgbot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -84,6 +85,25 @@ func TestDownloadFile_NonOKStatusReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = c.DownloadFile(context.Background(), "documents/missing.docx")
+
+	require.Error(t, err)
+}
+
+// TestDownloadFile_OversizedBodyReturnsError is a generic library-level
+// safety net, independent of any caller's own size policy: a response body
+// bigger than Telegram's own documented Bot API download ceiling must never
+// be read fully into memory, regardless of what the file metadata claimed
+// (Document.file_size is optional and cannot be trusted as a hard limit).
+func TestDownloadFile_OversizedBodyReturnsError(t *testing.T) {
+	oversized := bytes.Repeat([]byte("a"), maxDownloadSize+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(oversized)
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	_, err = c.DownloadFile(context.Background(), "documents/huge.docx")
 
 	require.Error(t, err)
 }
