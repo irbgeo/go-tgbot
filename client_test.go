@@ -107,3 +107,95 @@ func TestDownloadFile_OversizedBodyReturnsError(t *testing.T) {
 
 	require.Error(t, err)
 }
+
+func TestMessage_UnmarshalsSuccessfulPaymentField(t *testing.T) {
+	raw := `{"message_id":1,"date":0,"chat":{"id":1},"successful_payment":{"currency":"XTR","total_amount":10,"invoice_payload":"pa:abc123","telegram_payment_charge_id":"tpc_1","provider_payment_charge_id":""}}`
+
+	var m Message
+	require.NoError(t, json.Unmarshal([]byte(raw), &m))
+
+	require.NotNil(t, m.SuccessfulPayment)
+	require.Equal(t, "XTR", m.SuccessfulPayment.Currency)
+	require.Equal(t, int64(10), m.SuccessfulPayment.TotalAmount)
+	require.Equal(t, "pa:abc123", m.SuccessfulPayment.InvoicePayload)
+	require.Equal(t, "tpc_1", m.SuccessfulPayment.TelegramPaymentChargeID)
+}
+
+func TestUpdate_UnmarshalsPreCheckoutQueryField(t *testing.T) {
+	raw := `{"update_id":1,"pre_checkout_query":{"id":"pcq_1","from":{"id":42,"is_bot":false,"first_name":"A"},"currency":"XTR","total_amount":10,"invoice_payload":"pa:abc123"}}`
+
+	var u Update
+	require.NoError(t, json.Unmarshal([]byte(raw), &u))
+
+	require.NotNil(t, u.PreCheckoutQuery)
+	require.Equal(t, "pcq_1", u.PreCheckoutQuery.ID)
+	require.Equal(t, int64(42), u.PreCheckoutQuery.From.ID)
+	require.Equal(t, "XTR", u.PreCheckoutQuery.Currency)
+	require.Equal(t, int64(10), u.PreCheckoutQuery.TotalAmount)
+	require.Equal(t, "pa:abc123", u.PreCheckoutQuery.InvoicePayload)
+}
+
+func TestSendInvoice_SendsCorrectRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, float64(100), body["chat_id"])
+		require.Equal(t, "Phrase Analysis", body["title"])
+		require.Equal(t, "pa:abc123", body["payload"])
+		require.Equal(t, "", body["provider_token"])
+		require.Equal(t, "XTR", body["currency"])
+		prices, _ := body["prices"].([]any)
+		require.Len(t, prices, 1)
+		price, _ := prices[0].(map[string]any)
+		require.Equal(t, float64(10), price["amount"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":55,"date":0,"chat":{"id":100}}}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	msg, err := c.SendInvoice(context.Background(), 100, "Phrase Analysis", "One request", "pa:abc123", "XTR", "",
+		[]LabeledPrice{{Label: "Phrase Analysis", Amount: 10}}, nil)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(55), msg.MessageID)
+}
+
+func TestAnswerPreCheckoutQuery_SendsCorrectRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, "pcq_1", body["pre_checkout_query_id"])
+		require.Equal(t, true, body["ok"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	ok, err := c.AnswerPreCheckoutQuery(context.Background(), "pcq_1", true, "")
+
+	require.NoError(t, err)
+	require.True(t, ok)
+}
+
+func TestRefundStarPayment_SendsCorrectRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, float64(42), body["user_id"])
+		require.Equal(t, "tpc_1", body["telegram_payment_charge_id"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	ok, err := c.RefundStarPayment(context.Background(), 42, "tpc_1")
+
+	require.NoError(t, err)
+	require.True(t, ok)
+}

@@ -45,13 +45,14 @@ type Chat struct {
 
 // Message represents a Telegram message.
 type Message struct {
-	MessageID int64     `json:"message_id"`
-	Date      int64     `json:"date"`
-	Chat      Chat      `json:"chat"`
-	From      *User     `json:"from"`
-	Text      string    `json:"text"`
-	Caption   string    `json:"caption"`
-	Document  *Document `json:"document"`
+	MessageID         int64              `json:"message_id"`
+	Date              int64              `json:"date"`
+	Chat              Chat               `json:"chat"`
+	From              *User              `json:"from"`
+	Text              string             `json:"text"`
+	Caption           string             `json:"caption"`
+	Document          *Document          `json:"document"`
+	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
 }
 
 // Document describes a file attached to a message.
@@ -72,9 +73,10 @@ type File struct {
 
 // Update represents an incoming update.
 type Update struct {
-	UpdateID      int64          `json:"update_id"`
-	Message       *Message       `json:"message"`
-	CallbackQuery *CallbackQuery `json:"callback_query"`
+	UpdateID         int64             `json:"update_id"`
+	Message          *Message          `json:"message"`
+	CallbackQuery    *CallbackQuery    `json:"callback_query"`
+	PreCheckoutQuery *PreCheckoutQuery `json:"pre_checkout_query"`
 }
 
 // CallbackQuery represents a callback from an inline keyboard button.
@@ -206,4 +208,63 @@ type editMessageTextPayload struct {
 type EditMessageTextOptions struct {
 	ParseMode   string
 	ReplyMarkup *InlineKeyboardMarkup
+}
+
+// LabeledPrice is one portion of an invoice's price breakdown. For
+// Telegram Stars, exactly one LabeledPrice is required, and Amount is the
+// number of Stars directly (Stars have no decimal subdivision).
+type LabeledPrice struct {
+	Label  string `json:"label"`
+	Amount int    `json:"amount"`
+}
+
+// PreCheckoutQuery is sent when a user has confirmed payment details,
+// right before the charge is made. The bot must answer within 10 seconds
+// via AnswerPreCheckoutQuery.
+type PreCheckoutQuery struct {
+	ID             string `json:"id"`
+	From           User   `json:"from"`
+	Currency       string `json:"currency"`
+	TotalAmount    int64  `json:"total_amount"`
+	InvoicePayload string `json:"invoice_payload"`
+}
+
+// SuccessfulPayment is attached to the service message Telegram sends once
+// a payment completes. TelegramPaymentChargeID is what RefundStarPayment
+// needs to reverse it.
+type SuccessfulPayment struct {
+	Currency                string `json:"currency"`
+	TotalAmount             int64  `json:"total_amount"`
+	InvoicePayload          string `json:"invoice_payload"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID string `json:"provider_payment_charge_id"`
+}
+
+// SendInvoiceOptions configures SendInvoice. Only the fields this project
+// needs — the real API has many more (photo, tips, shipping, ...), all
+// documented as "ignored for payments in Telegram Stars".
+type SendInvoiceOptions struct {
+	ReplyMarkup *InlineKeyboardMarkup
+}
+
+type sendInvoicePayload struct {
+	ChatID        int64          `json:"chat_id"`
+	Title         string         `json:"title"`
+	Description   string         `json:"description"`
+	Payload       string         `json:"payload"`
+	ProviderToken string         `json:"provider_token"`
+	Currency      string         `json:"currency"`
+	Prices        []LabeledPrice `json:"prices"`
+	ReplyMarkup   any            `json:"reply_markup,omitempty"`
+}
+
+type answerPreCheckoutQueryPayload struct {
+	PreCheckoutQueryID string `json:"pre_checkout_query_id"`
+	OK                 bool   `json:"ok"`
+	ErrorMessage       string `json:"error_message,omitempty"`
+}
+
+type refundStarPaymentPayload struct {
+	UserID                  int64  `json:"user_id"`
+	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
 }

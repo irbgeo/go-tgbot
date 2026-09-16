@@ -243,6 +243,46 @@ func (s *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, err
 	return data, nil
 }
 
+// SendInvoice sends an invoice message. currency and providerToken are
+// left to the caller rather than hardcoded, since go-tgbot is a
+// general-purpose library — Stars-specific defaults (currency "XTR", empty
+// providerToken) belong in the caller.
+func (s *Client) SendInvoice(ctx context.Context, chatID int64, title, description, payload, currency, providerToken string, prices []LabeledPrice, opts *SendInvoiceOptions) (Message, error) {
+	body := sendInvoicePayload{
+		ChatID:        chatID,
+		Title:         title,
+		Description:   description,
+		Payload:       payload,
+		ProviderToken: providerToken,
+		Currency:      currency,
+		Prices:        prices,
+	}
+	if opts != nil {
+		body.ReplyMarkup = opts.ReplyMarkup
+	}
+	return doJSON[Message](ctx, s, "sendInvoice", body)
+}
+
+// AnswerPreCheckoutQuery answers a pre_checkout_query. Must be called
+// within 10 seconds of receiving it. Pass ok=false with a human-readable
+// errorMessage to reject (Telegram shows it to the user); errorMessage is
+// ignored when ok=true.
+func (s *Client) AnswerPreCheckoutQuery(ctx context.Context, preCheckoutQueryID string, ok bool, errorMessage string) (bool, error) {
+	return doJSON[bool](ctx, s, "answerPreCheckoutQuery", answerPreCheckoutQueryPayload{
+		PreCheckoutQueryID: preCheckoutQueryID,
+		OK:                 ok,
+		ErrorMessage:       errorMessage,
+	})
+}
+
+// RefundStarPayment reverses a completed Telegram Stars payment.
+func (s *Client) RefundStarPayment(ctx context.Context, userID int64, telegramPaymentChargeID string) (bool, error) {
+	return doJSON[bool](ctx, s, "refundStarPayment", refundStarPaymentPayload{
+		UserID:                  userID,
+		TelegramPaymentChargeID: telegramPaymentChargeID,
+	})
+}
+
 func (s *Client) fileEndpoint(filePath string) (string, error) {
 	return s.buildURL("file", "bot"+s.token, filePath)
 }
