@@ -165,3 +165,17 @@ func TestSplitText(t *testing.T) {
 		require.True(t, strings.HasSuffix(p, "\n"), "each part but the last ends a line")
 	}
 }
+
+func TestIsChargeAlreadyRefunded(t *testing.T) {
+	refunded := &APIError{
+		Code:        400,
+		Description: "Bad Request: CHARGE_ALREADY_REFUNDED",
+	}
+	require.True(t, refunded.IsChargeAlreadyRefunded())
+	require.True(t, IsChargeAlreadyRefunded(fmt.Errorf("refund: %w", refunded)), "found through wrapping")
+	require.False(t, (&APIError{Code: 400, Description: "Bad Request: CHARGE_NOT_FOUND"}).IsChargeAlreadyRefunded())
+	require.False(t, IsChargeAlreadyRefunded(errors.New("network down")))
+	require.False(t, IsChargeAlreadyRefunded(nil))
+	var nilErr *APIError
+	require.False(t, nilErr.IsChargeAlreadyRefunded())
+}

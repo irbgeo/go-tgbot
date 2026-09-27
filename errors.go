@@ -27,6 +27,14 @@ func IsNotModified(err error) bool {
 	return ok && apiErr.IsNotModified()
 }
 
+// IsChargeAlreadyRefunded reports whether err holds an *APIError for which
+// APIError.IsChargeAlreadyRefunded is true (refundStarPayment on a charge
+// that was already refunded).
+func IsChargeAlreadyRefunded(err error) bool {
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.IsChargeAlreadyRefunded()
+}
+
 // RetryAfter returns the wait Telegram asked for, if err holds an *APIError
 // with such a hint (HTTP 429).
 func RetryAfter(err error) (time.Duration, bool) {
@@ -48,6 +56,13 @@ func (s *APIError) IsForbidden() bool {
 // new content is identical to the current message. Safe to treat as success.
 func (s *APIError) IsNotModified() bool {
 	return s != nil && strings.Contains(strings.ToLower(s.Description), "not modified")
+}
+
+// IsChargeAlreadyRefunded reports whether refundStarPayment failed because
+// the charge was refunded before. The money is back with the user, so a
+// caller can treat it as success.
+func (s *APIError) IsChargeAlreadyRefunded() bool {
+	return s != nil && strings.Contains(s.Description, "CHARGE_ALREADY_REFUNDED")
 }
 
 // RetryAfter returns the delay Telegram asks the caller to wait before
