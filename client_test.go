@@ -79,6 +79,29 @@ func TestDownloadFile_ReturnsBytes(t *testing.T) {
 	require.Equal(t, []byte("file contents"), data)
 }
 
+func TestWithTestEnvironment_AddsTestToPaths(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bottest-token/test/getFile":
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_path":"documents/file_1.docx"}}`))
+		case "/file/bottest-token/test/documents/file_1.docx":
+			_, _ = w.Write([]byte("file contents"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL), WithTestEnvironment())
+	require.NoError(t, err)
+
+	filePath, err := c.GetFile(context.Background(), "abc123")
+	require.NoError(t, err)
+	data, err := c.DownloadFile(context.Background(), filePath)
+
+	require.NoError(t, err)
+	require.Equal(t, []byte("file contents"), data)
+}
+
 func TestDownloadFile_NonOKStatusReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

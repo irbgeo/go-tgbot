@@ -28,6 +28,9 @@ type Client struct {
 	token   string
 	baseURL string
 	http    *http.Client
+	// env is the path segment after bot<token>: "test" for Telegram's test
+	// environment (WithTestEnvironment), "" for production.
+	env string
 	// maxRetryWait is the longest 429 wait the client sits out itself
 	// (WithRetryAfter); 0 turns that off.
 	maxRetryWait time.Duration
@@ -303,11 +306,13 @@ func (s *Client) do(req *http.Request) (*http.Response, error) {
 }
 
 func (s *Client) fileEndpoint(filePath string) (string, error) {
-	return s.buildURL("file", "bot"+s.token, filePath)
+	return s.buildURL("file", "bot"+s.token, s.env, filePath)
 }
 
+// endpoint and fileEndpoint pass env even when it is "": path.Join skips
+// empty segments.
 func (s *Client) endpoint(method string) (string, error) {
-	return s.buildURL("bot"+s.token, method)
+	return s.buildURL("bot"+s.token, s.env, method)
 }
 
 // buildURL joins segments onto baseURL's path — shared by endpoint (the Bot

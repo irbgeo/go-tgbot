@@ -88,6 +88,18 @@ This is useful for tests or for a local Telegram Bot API server.
 client, err := tgbot.NewClient("TOKEN", tgbot.WithBaseURL("https://api.telegram.org"))
 ```
 
+### WithTestEnvironment
+
+Send all requests to Telegram's
+[test environment](https://core.telegram.org/bots/features#testing-your-bot).
+The client adds `/test/` to the path: `/bot<token>/test/<method>`, and
+`/file/bot<token>/test/<path>` for file downloads. A bot in the test
+environment has its own token — get it from @BotFather in the test app.
+
+```go
+client, err := tgbot.NewClient("TEST_TOKEN", tgbot.WithTestEnvironment())
+```
+
 ### WithRetryAfter
 
 When Telegram answers `429 Too Many Requests` and asks to wait no longer than
@@ -224,6 +236,11 @@ How it works:
 - `Shutdown(grace)` starts nothing new from the queues (queued updates are
   dropped and reported), waits up to `grace`, then cancels the handler contexts
   and waits for the handlers to return. Payments still run after `Shutdown`.
+- `Stop()` does only the first part: it starts nothing new from the queues and
+  does not wait.
+
+Leave time for cleanup: Docker kills a container 10 seconds after `docker stop`
+by default, so raise `stop_grace_period` if your `grace` is longer.
 
 ### Webhooks
 
@@ -292,7 +309,7 @@ func handle(ctx context.Context, u tgbot.Update) error {
 | Method       | Returns          | Meaning                                                |
 |--------------|------------------|--------------------------------------------------------|
 | `ChatID()`   | `int64`          | Chat ID of the message or the callback's message.      |
-| `SenderID()` | `int64`          | User ID of the sender or the button presser.           |
+| `SenderID()` | `int64`          | User ID of the sender, button presser, or payer.       |
 | `Command()`  | `(string, bool)` | Bot command without `/`, `@botname`, or arguments.     |
 
 ## Sending messages
@@ -306,9 +323,9 @@ To change the behavior, pass `*SendMessageOptions`:
 ```go
 msg, err := client.SendMessage(ctx, chatID, "*Bold* text", &tgbot.SendMessageOptions{
 	ParseMode:             tgbot.ParseModeMarkdownV2,
-	DisableWebPagePreview:  true,
-	DisableNotification:    true,
-	ReplyToMessageID:       someMessageID,
+	DisableWebPagePreview: true,
+	DisableNotification:   true,
+	ReplyToMessageID:      someMessageID,
 })
 ```
 
@@ -344,6 +361,10 @@ for _, part := range tgbot.SplitText(longText) {
 _, err := client.EditMessageText(ctx, chatID, messageID, "New text", nil)
 ```
 
+`EditMessageTextOptions` has `ParseMode` and `ReplyMarkup` (an inline
+keyboard only). If the new text is the same as the old one, Telegram returns
+an error — see `IsNotModified` in [Error handling](#error-handling).
+
 ### Delete a message
 
 ```go
@@ -353,7 +374,8 @@ ok, err := client.DeleteMessage(ctx, chatID, messageID)
 ## Keyboards
 
 `ReplyMarkup` accepts one of three types: `InlineKeyboardMarkup`,
-`ReplyKeyboardMarkup`, or `ReplyKeyboardRemove`. Pass it by value.
+`ReplyKeyboardMarkup`, or `ReplyKeyboardRemove`. You can pass a value or a
+pointer (the builders below return a pointer).
 
 ### Inline keyboard
 
@@ -400,6 +422,24 @@ _, err := client.AnswerCallbackQuery(ctx, query.ID, &tgbot.AnswerCallbackQueryOp
 // Or just dismiss the spinner (the common case):
 _, err = client.AnswerCallback(ctx, query.ID)
 ```
+
+`CallbackQuery` has nil-safe helpers to find the message with the button, for
+example to edit it in place:
+
+```go
+q := u.CallbackQuery
+_, _ = client.AnswerCallback(ctx, q.ID)
+_, err := client.EditMessageText(ctx, q.ChatID(), q.MessageID(), "You voted: "+q.Data, nil)
+```
+
+| Method        | Returns | Meaning                                         |
+|---------------|---------|-------------------------------------------------|
+| `SenderID()`  | `int64` | User who tapped the button.                     |
+| `ChatID()`    | `int64` | Chat of the message with the button (`0` if none). |
+| `MessageID()` | `int64` | ID of the message with the button (`0` if none).   |
+
+Callback data (`Button(text, data)`) can be at most
+`tgbot.MaxCallbackDataLength` (64) bytes.
 
 ### Reply keyboard
 
@@ -484,6 +524,84 @@ Both `SendPhotoOptions` and `SendDocumentOptions` have the same fields:
 |-------------|----------|-------------------------------|
 | `Caption`   | `string` | Text under the file.          |
 | `ParseMode` | `string` | Parse mode for the caption.   |
+
+## Receiving files
+
+When a user sends a file, the message has a `Document` with a `FileID`.
+Getting the bytes takes two steps: `GetFile` turns the file ID into a short-lived
+path, and `DownloadFile` reads the file from that path. Download it right away —
+the path expires.
+
+```go
+if doc := u.Message.Document; doc != nil {
+	path, err := client.GetFile(ctx, doc.FileID)
+	if err != nil {
+		return err
+	}
+	data, err := client.DownloadFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	log.Printf("got %s (%s), %d bytes", doc.FileName, doc.MimeType, len(data))
+}
+```
+
+The Bot API gives at most 20 MB per file. `DownloadFile` returns an error for a
+bigger file, so a bad server cannot fill your memory.
+
+## Payments (Telegram Stars)
+
+A Stars payment has three steps:
+
+1. Send an invoice with `SendInvoice`. Use `tgbot.CurrencyStars` and an empty
+   provider token. Give exactly one price; `Amount` is the number of Stars.
+2. Telegram sends a `PreCheckoutQuery`. Answer it with `AnswerPreCheckoutQuery`
+   **within 10 seconds**, or the payment is cancelled.
+3. Telegram sends a message with `SuccessfulPayment`. Now give the user what
+   they paid for. Save `TelegramPaymentChargeID` — you need it for a refund.
+
+```go
+_, err := client.SendInvoice(ctx, chatID,
+	"Premium",               // title
+	"30 days of premium",    // description
+	"premium-30d",           // your payload, comes back in the next steps
+	tgbot.CurrencyStars,
+	"",                      // provider token: empty for Stars
+	[]tgbot.LabeledPrice{
+		{
+			Label:  "Premium",
+			Amount: 100, // 100 Stars
+		},
+	},
+	nil,
+)
+```
+
+```go
+func handle(ctx context.Context, u tgbot.Update) error {
+	if q := u.PreCheckoutQuery; q != nil {
+		// Check q.InvoicePayload and q.TotalAmount. Pass false and a
+		// message to decline; Telegram shows the message to the user.
+		_, err := client.AnswerPreCheckoutQuery(ctx, q.ID, true, "")
+		return err
+	}
+	if u.Message != nil && u.Message.SuccessfulPayment != nil {
+		p := u.Message.SuccessfulPayment
+		// Give the goods for p.InvoicePayload.
+		// Keep p.TelegramPaymentChargeID for a refund.
+	}
+	return nil
+}
+```
+
+To refund:
+
+```go
+ok, err := client.RefundStarPayment(ctx, userID, chargeID)
+```
+
+Receive `pre_checkout_query` updates: if you set `AllowedUpdates`, add it to
+the list. With `Dispatcher`, payment updates never wait behind other updates.
 
 ## Bot commands
 
@@ -588,11 +706,13 @@ if d, ok := tgbot.RetryAfter(err); ok {
 | `ReplyRow` / `ReplyKeyboard`              | Build reply keyboard rows and markup.               |
 | `Update.ChatID` / `.SenderID`             | Read the chat and user IDs from any update.         |
 | `Update.Command`                          | Read the bot command from a message.                |
+| `CallbackQuery.ChatID` / `.MessageID` / `.SenderID` | Find the button's message and the user who tapped it. |
 | `APIError.IsForbidden` / `.IsNotModified` | Check common API error cases.                        |
 | `APIError.RetryAfter`                     | Read the `429` wait time.                            |
 | `IsForbidden` / `IsNotModified` / `RetryAfter` | The same checks on any (wrapped) `error`.       |
 | `SplitText`                               | Cut a long text into parts of at most 4096 characters. |
 | `NewDispatcher`                           | Run updates of different chats in parallel (see above). |
+| `Dispatcher.Stop` / `.Shutdown`           | Stop the dispatcher (`Shutdown` also waits).        |
 | `MaxMessageLength` / `MaxCallbackDataLength` | Telegram's limits: 4096 characters, 64 bytes.   |
 | `CurrencyStars`                           | `"XTR"`, the currency of a Telegram Stars invoice.  |
 
