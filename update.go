@@ -3,11 +3,14 @@ package tgbot
 import "strings"
 
 // SenderID returns the Telegram user id behind the update (the sender of a
-// message or the presser of an inline button), or 0 when unknown.
+// message, the presser of an inline button, or the payer of a pre-checkout
+// query), or 0 when unknown.
 func (s Update) SenderID() int64 {
 	switch {
 	case s.CallbackQuery != nil:
 		return s.CallbackQuery.SenderID()
+	case s.PreCheckoutQuery != nil:
+		return s.PreCheckoutQuery.From.ID
 	case s.Message != nil && s.Message.From != nil:
 		return s.Message.From.ID
 	}
@@ -23,7 +26,7 @@ func (s Update) ChatID() int64 {
 	return s.CallbackQuery.ChatID() // nil-safe
 }
 
-// SenderID returns the user id of the tutor who pressed the inline button, or 0
+// SenderID returns the user id of the user who pressed the inline button, or 0
 // when unknown.
 func (s *CallbackQuery) SenderID() int64 {
 	if s == nil {

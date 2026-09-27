@@ -1,8 +1,12 @@
 package tgbot
 
 import (
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 )
@@ -106,4 +110,58 @@ func TestAPIErrorHelpers(t *testing.T) {
 	var e *APIError
 	require.False(t, e.IsForbidden(), "nil APIError helpers should be false")
 	require.False(t, e.IsNotModified(), "nil APIError helpers should be false")
+}
+
+func TestUpdateSenderID_PreCheckoutQuery(t *testing.T) {
+	upd := Update{
+		PreCheckoutQuery: &PreCheckoutQuery{
+			ID:   "pcq",
+			From: User{ID: 11},
+		},
+	}
+	require.Equal(t, int64(11), upd.SenderID())
+}
+
+func TestErrorHelpers_SeeWrappedAPIError(t *testing.T) {
+	forbidden := fmt.Errorf("send: %w", &APIError{Code: 403, Description: "Forbidden: bot was blocked by the user"})
+	notModified := fmt.Errorf("edit: %w", &APIError{Code: 400, Description: "Bad Request: message is not modified"})
+	flood := fmt.Errorf("send: %w", &APIError{Code: 429, Parameters: &ResponseParameters{RetryAfter: 3}})
+
+	require.True(t, IsForbidden(forbidden))
+	require.False(t, IsForbidden(notModified))
+	require.True(t, IsNotModified(notModified))
+	require.False(t, IsNotModified(forbidden))
+	d, ok := RetryAfter(flood)
+	require.True(t, ok)
+	require.Equal(t, 3*time.Second, d)
+
+	for _, err := range []error{nil, errors.New("network down")} {
+		require.False(t, IsForbidden(err))
+		require.False(t, IsNotModified(err))
+		_, ok := RetryAfter(err)
+		require.False(t, ok)
+	}
+}
+
+func TestSplitText(t *testing.T) {
+	require.Equal(t, []string{"short"}, SplitText("short"))
+	require.Equal(t, []string{""}, SplitText(""))
+
+	// Cyrillic: the limit counts characters, not bytes.
+	long := strings.Repeat("я", MaxMessageLength*2+10)
+	parts := SplitText(long)
+	require.Len(t, parts, 3)
+	require.Equal(t, long, strings.Join(parts, ""), "nothing is lost")
+	for _, p := range parts {
+		require.LessOrEqual(t, utf8.RuneCountInString(p), MaxMessageLength)
+	}
+
+	// A cut prefers the end of a line.
+	line := strings.Repeat("a", 99) + "\n"
+	text := strings.Repeat(line, 60)
+	parts = SplitText(text)
+	require.Equal(t, text, strings.Join(parts, ""))
+	for _, p := range parts[:len(parts)-1] {
+		require.True(t, strings.HasSuffix(p, "\n"), "each part but the last ends a line")
+	}
 }

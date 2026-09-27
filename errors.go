@@ -1,6 +1,7 @@
 package tgbot
 
 import (
+	"errors"
 	"strings"
 	"time"
 )
@@ -11,6 +12,30 @@ const (
 	ParseModeMarkdownV2 = "MarkdownV2"
 	ParseModeMarkdown   = "Markdown"
 )
+
+// IsForbidden reports whether err holds an *APIError for which
+// APIError.IsForbidden is true (the user blocked the bot).
+func IsForbidden(err error) bool {
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.IsForbidden()
+}
+
+// IsNotModified reports whether err holds an *APIError for which
+// APIError.IsNotModified is true (an edit changed nothing).
+func IsNotModified(err error) bool {
+	apiErr, ok := asAPIError(err)
+	return ok && apiErr.IsNotModified()
+}
+
+// RetryAfter returns the wait Telegram asked for, if err holds an *APIError
+// with such a hint (HTTP 429).
+func RetryAfter(err error) (time.Duration, bool) {
+	apiErr, ok := asAPIError(err)
+	if !ok {
+		return 0, false
+	}
+	return apiErr.RetryAfter()
+}
 
 // IsForbidden reports whether the API rejected the call with HTTP 403 — in a
 // private chat this means the user blocked the bot or their account is
@@ -32,4 +57,10 @@ func (s *APIError) RetryAfter() (time.Duration, bool) {
 		return time.Duration(s.Parameters.RetryAfter) * time.Second, true
 	}
 	return 0, false
+}
+
+func asAPIError(err error) (*APIError, bool) {
+	var apiErr *APIError
+	ok := errors.As(err, &apiErr)
+	return apiErr, ok
 }

@@ -88,6 +88,26 @@ This is useful for tests or for a local Telegram Bot API server.
 client, err := tgbot.NewClient("TOKEN", tgbot.WithBaseURL("https://api.telegram.org"))
 ```
 
+### WithRetryAfter
+
+When Telegram answers `429 Too Many Requests` and asks to wait no longer than
+the given time, the client waits and sends the call once more. A longer wait, or
+a second `429`, comes back to you as an error. It is off by default. It is useful
+when a bot sends many messages to one chat in a row.
+
+```go
+client, err := tgbot.NewClient("TOKEN", tgbot.WithRetryAfter(10*time.Second))
+```
+
+Keep the time short where an answer has a deadline: a pre-checkout query must be
+answered within 10 seconds.
+
+### The bot token in errors
+
+The bot token is part of every request URL. When a request fails on the network,
+the client puts `***` in place of the token in the error text, so it is safe to
+log the error. `errors.Is(err, context.DeadlineExceeded)` still works.
+
 ## Getting updates
 
 There are two ways to get messages from users: **long polling** and **webhooks**.
@@ -171,6 +191,39 @@ through `OnError`.
 | `AllowedUpdates` | `[]string`      | Update types you want (`nil` = all but `chat_member`). |
 | `Backoff`        | `time.Duration` | Pause after a transient error. Default `3s`.         |
 | `OnError`        | `func(error)`   | Called on a non-fatal error. The loop keeps running. |
+
+### Dispatcher: many chats at once
+
+`Poll` calls the handler for one update at a time. If one request is slow (a
+call to an LLM, a big file), every other user waits, and Telegram cancels a
+payment when the pre-checkout query is not answered within 10 seconds.
+
+`Dispatcher` fixes this. Give its `Handle` to `Poll`, and call `Shutdown` when
+`Poll` returns:
+
+```go
+d := tgbot.NewDispatcher(
+	handle, // func(context.Context, tgbot.Update) error
+	func(err error) { log.Println("handle:", err) },
+)
+err := client.Poll(ctx, tgbot.PollOptions{}, d.Handle)
+d.Shutdown(45 * time.Second)
+```
+
+How it works:
+
+- Updates of one chat run one after another, in order. Different chats run in
+  parallel.
+- A pre-checkout query, a successful payment and an update without a chat never
+  wait in a queue.
+- One chat can queue at most 50 updates. Newer ones are dropped and reported.
+- A handler error or panic is reported through the second argument. It does not
+  stop other handlers.
+- The handler context is **not** cancelled when the poll context ends, so a
+  request that already started can finish.
+- `Shutdown(grace)` starts nothing new from the queues (queued updates are
+  dropped and reported), waits up to `grace`, then cancels the handler contexts
+  and waits for the handlers to return. Payments still run after `Shutdown`.
 
 ### Webhooks
 
@@ -261,6 +314,18 @@ msg, err := client.SendMessage(ctx, chatID, "*Bold* text", &tgbot.SendMessageOpt
 
 For the parse mode you can pass a plain string or use one of the constants:
 `tgbot.ParseModeHTML`, `tgbot.ParseModeMarkdownV2`, `tgbot.ParseModeMarkdown`.
+
+A message can hold at most `tgbot.MaxMessageLength` (4096) characters. Telegram
+refuses a longer text. `SplitText` cuts a text into parts that fit, at line
+breaks where possible:
+
+```go
+for _, part := range tgbot.SplitText(longText) {
+	if _, err := client.SendMessage(ctx, chatID, part, nil); err != nil {
+		return err
+	}
+}
+```
 
 `SendMessageOptions` fields:
 
@@ -466,13 +531,21 @@ on codes or text yourself:
 | `IsNotModified()` | `bool`               | An `EditMessage*` call changed nothing. Safe to treat as OK.   |
 | `RetryAfter()`    | `(time.Duration, bool)` | How long to wait after a `429`. `false` when there is no hint. |
 
-All three are safe to call on a `nil` `*APIError`. Example:
+All three are safe to call on a `nil` `*APIError`.
+
+The package has the same three as functions that take any `error`. They look
+inside wrapped errors, so you do not need `errors.As`:
 
 ```go
 _, err := client.EditMessageText(ctx, chatID, messageID, text, nil)
-var apiErr *tgbot.APIError
-if errors.As(err, &apiErr) && apiErr.IsNotModified() {
+if tgbot.IsNotModified(err) {
 	err = nil // the text was already the same
+}
+if tgbot.IsForbidden(err) {
+	// the user blocked the bot
+}
+if d, ok := tgbot.RetryAfter(err); ok {
+	log.Printf("flood limit, wait %s", d)
 }
 ```
 
@@ -500,6 +573,10 @@ if errors.As(err, &apiErr) && apiErr.IsNotModified() {
 | `SendPhoto`           | Send a photo.                                 |
 | `SendDocument`        | Send a document.                              |
 | `SetMyCommands`       | Set the bot's command list.                   |
+| `GetFile` / `DownloadFile` | Download a file a user sent.             |
+| `SendInvoice`         | Send an invoice (for Stars: `CurrencyStars`, empty provider token). |
+| `AnswerPreCheckoutQuery` | Accept or decline a payment (within 10 s). |
+| `RefundStarPayment`   | Refund a Telegram Stars payment.              |
 
 ### Helper functions and methods
 
@@ -513,6 +590,11 @@ if errors.As(err, &apiErr) && apiErr.IsNotModified() {
 | `Update.Command`                          | Read the bot command from a message.                |
 | `APIError.IsForbidden` / `.IsNotModified` | Check common API error cases.                        |
 | `APIError.RetryAfter`                     | Read the `429` wait time.                            |
+| `IsForbidden` / `IsNotModified` / `RetryAfter` | The same checks on any (wrapped) `error`.       |
+| `SplitText`                               | Cut a long text into parts of at most 4096 characters. |
+| `NewDispatcher`                           | Run updates of different chats in parallel (see above). |
+| `MaxMessageLength` / `MaxCallbackDataLength` | Telegram's limits: 4096 characters, 64 bytes.   |
+| `CurrencyStars`                           | `"XTR"`, the currency of a Telegram Stars invoice.  |
 
 ## License
 

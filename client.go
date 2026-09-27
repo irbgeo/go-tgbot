@@ -28,6 +28,9 @@ type Client struct {
 	token   string
 	baseURL string
 	http    *http.Client
+	// maxRetryWait is the longest 429 wait the client sits out itself
+	// (WithRetryAfter); 0 turns that off.
+	maxRetryWait time.Duration
 }
 
 // NewClient creates a new Telegram Bot API client.
@@ -224,9 +227,9 @@ func (s *Client) DownloadFile(ctx context.Context, filePath string) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("telegram: new request: %w", err)
 	}
-	res, err := s.http.Do(req)
+	res, err := s.do(req)
 	if err != nil {
-		return nil, fmt.Errorf("telegram: request failed: %w", err)
+		return nil, err
 	}
 	defer res.Body.Close() // nolint:errcheck
 	if res.StatusCode != http.StatusOK {
@@ -283,6 +286,22 @@ func (s *Client) RefundStarPayment(ctx context.Context, userID int64, telegramPa
 	})
 }
 
+// do sends the request. The bot token is part of every request URL, and
+// net/http puts that URL into its errors (*url.Error), so on failure the
+// token is replaced with "***" before the error reaches callers and logs.
+// The error chain is kept: errors.Is(err, context.DeadlineExceeded) works.
+func (s *Client) do(req *http.Request) (*http.Response, error) {
+	res, err := s.http.Do(req)
+	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			urlErr.URL = strings.ReplaceAll(urlErr.URL, s.token, "***")
+		}
+		return nil, fmt.Errorf("telegram: request failed: %w", err)
+	}
+	return res, nil
+}
+
 func (s *Client) fileEndpoint(filePath string) (string, error) {
 	return s.buildURL("file", "bot"+s.token, filePath)
 }
@@ -332,49 +351,24 @@ func (s *APIError) Error() string {
 }
 
 func doJSON[T any](ctx context.Context, c *Client, method string, payload any) (T, error) {
-	var zero T
-	endpoint, err := c.endpoint(method)
-	if err != nil {
-		return zero, err
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
+		var zero T
 		return zero, fmt.Errorf("telegram: marshal payload: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return zero, fmt.Errorf("telegram: new request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := c.http.Do(req)
-	if err != nil {
-		return zero, fmt.Errorf("telegram: request failed: %w", err)
-	}
-	defer res.Body.Close() // nolint:errcheck
-
-	var apiRes apiResponse[T]
-	if err := json.NewDecoder(res.Body).Decode(&apiRes); err != nil {
-		return zero, fmt.Errorf("telegram: decode response: %w", err)
-	}
-	if !apiRes.Ok {
-		return zero, &APIError{Code: apiRes.ErrorCode, Description: apiRes.Description, Parameters: apiRes.Parameters}
-	}
-	return apiRes.Result, nil
-}
-
-type formFile struct {
-	Field    string
-	Reader   io.Reader
-	Filename string
+	return call[T](
+		ctx,
+		c,
+		apiRequest{
+			Method:      method,
+			ContentType: "application/json",
+			Body:        body,
+		},
+	)
 }
 
 func doMultipart[T any](ctx context.Context, c *Client, method string, fields map[string]string, files []formFile) (T, error) {
 	var zero T
-	endpoint, err := c.endpoint(method)
-	if err != nil {
-		return zero, err
-	}
-
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 	for k, v := range fields {
@@ -398,16 +392,50 @@ func doMultipart[T any](ctx context.Context, c *Client, method string, fields ma
 	if err := writer.Close(); err != nil {
 		return zero, fmt.Errorf("telegram: close multipart: %w", err)
 	}
+	return call[T](
+		ctx,
+		c,
+		apiRequest{
+			Method:      method,
+			ContentType: writer.FormDataContentType(),
+			Body:        buf.Bytes(),
+		},
+	)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &buf)
+// call sends one Bot API request. When Telegram asks to wait (429) no longer
+// than maxRetryWait, it waits and sends the same body once more — the body
+// is kept in memory for that.
+func call[T any](ctx context.Context, c *Client, r apiRequest) (T, error) {
+	res, err := send[T](ctx, c, r)
+	if c.maxRetryWait <= 0 {
+		return res, err
+	}
+	wait, asked := RetryAfter(err)
+	if !asked || wait > c.maxRetryWait {
+		return res, err
+	}
+	sleep(ctx, wait)
+	if ctx.Err() != nil {
+		return res, fmt.Errorf("telegram: waiting to retry %s: %w", r.Method, ctx.Err())
+	}
+	return send[T](ctx, c, r)
+}
+
+func send[T any](ctx context.Context, c *Client, r apiRequest) (T, error) {
+	var zero T
+	endpoint, err := c.endpoint(r.Method)
+	if err != nil {
+		return zero, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(r.Body))
 	if err != nil {
 		return zero, fmt.Errorf("telegram: new request: %w", err)
 	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-
-	res, err := c.http.Do(req)
+	req.Header.Set("Content-Type", r.ContentType)
+	res, err := c.do(req)
 	if err != nil {
-		return zero, fmt.Errorf("telegram: request failed: %w", err)
+		return zero, err
 	}
 	defer res.Body.Close() // nolint:errcheck
 
@@ -416,7 +444,11 @@ func doMultipart[T any](ctx context.Context, c *Client, method string, fields ma
 		return zero, fmt.Errorf("telegram: decode response: %w", err)
 	}
 	if !apiRes.Ok {
-		return zero, &APIError{Code: apiRes.ErrorCode, Description: apiRes.Description, Parameters: apiRes.Parameters}
+		return zero, &APIError{
+			Code:        apiRes.ErrorCode,
+			Description: apiRes.Description,
+			Parameters:  apiRes.Parameters,
+		}
 	}
 	return apiRes.Result, nil
 }

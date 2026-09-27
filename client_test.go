@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -198,4 +201,152 @@ func TestRefundStarPayment_SendsCorrectRequestBody(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, ok)
+}
+
+// deadServer returns the URL of a server that is already closed, so every
+// request fails with a network error.
+func deadServer() string {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	return server.URL
+}
+
+func TestNetworkErrorsHideToken(t *testing.T) {
+	const token = "123456:SECRET-token"
+	c, err := NewClient(token, WithBaseURL(deadServer()))
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, jsonErr := c.GetMe(ctx)
+	_, multipartErr := c.SendDocument(
+		ctx,
+		1,
+		InputFile{
+			Reader:   bytes.NewReader([]byte("x")),
+			Filename: "a.txt",
+		},
+		nil,
+	)
+	_, downloadErr := c.DownloadFile(ctx, "docs/a.txt")
+
+	for name, err := range map[string]error{
+		"json":      jsonErr,
+		"multipart": multipartErr,
+		"download":  downloadErr,
+	} {
+		require.Error(t, err, name)
+		require.NotContains(t, err.Error(), "SECRET", name)
+		require.Contains(t, err.Error(), "/bot***/", name)
+	}
+}
+
+func TestNetworkErrorKeepsCause(t *testing.T) {
+	c, err := NewClient("123456:SECRET-token", WithBaseURL(deadServer()))
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = c.GetMe(ctx)
+	require.ErrorIs(t, err, context.Canceled, "callers can still check the cause")
+	require.NotContains(t, err.Error(), "SECRET")
+}
+
+// floodServer answers the first `floods` calls with a 429 asking to wait
+// retryAfter seconds, and every later call with ok. It counts the calls.
+func floodServer(t *testing.T, floods, retryAfter int) (url string, calls *atomic.Int32) {
+	t.Helper()
+	calls = &atomic.Int32{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if int(n) <= floods {
+			_, _ = fmt.Fprintf(w, `{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":%d}}`, retryAfter)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":5,"chat":{"id":1}}}`))
+	}))
+	t.Cleanup(server.Close)
+	return server.URL, calls
+}
+
+func TestRetryAfter_WaitsAndSendsAgain(t *testing.T) {
+	url, calls := floodServer(t, 1, 1)
+	c, err := NewClient("test-token", WithBaseURL(url), WithRetryAfter(2*time.Second))
+	require.NoError(t, err)
+
+	start := time.Now()
+	msg, err := c.SendMessage(context.Background(), 1, "hi", nil)
+
+	require.NoError(t, err)
+	require.Equal(t, int64(5), msg.MessageID)
+	require.EqualValues(t, 2, calls.Load())
+	require.GreaterOrEqual(t, time.Since(start), time.Second, "it waited as Telegram asked")
+}
+
+func TestRetryAfter_RetriesUploadsToo(t *testing.T) {
+	url, calls := floodServer(t, 1, 1)
+	c, err := NewClient("test-token", WithBaseURL(url), WithRetryAfter(2*time.Second))
+	require.NoError(t, err)
+
+	_, err = c.SendDocument(
+		context.Background(),
+		1,
+		InputFile{
+			Reader:   bytes.NewReader([]byte("x")),
+			Filename: "a.txt",
+		},
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestRetryAfter_OnlyOnce(t *testing.T) {
+	url, calls := floodServer(t, 5, 1)
+	c, err := NewClient("test-token", WithBaseURL(url), WithRetryAfter(2*time.Second))
+	require.NoError(t, err)
+
+	_, err = c.SendMessage(context.Background(), 1, "hi", nil)
+
+	_, asked := RetryAfter(err)
+	require.True(t, asked, "the second 429 goes to the caller")
+	require.EqualValues(t, 2, calls.Load())
+}
+
+func TestRetryAfter_LongWaitGoesToCaller(t *testing.T) {
+	url, calls := floodServer(t, 1, 30)
+	c, err := NewClient("test-token", WithBaseURL(url), WithRetryAfter(2*time.Second))
+	require.NoError(t, err)
+
+	_, err = c.SendMessage(context.Background(), 1, "hi", nil)
+
+	d, asked := RetryAfter(err)
+	require.True(t, asked)
+	require.Equal(t, 30*time.Second, d)
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestRetryAfter_OffByDefault(t *testing.T) {
+	url, calls := floodServer(t, 1, 1)
+	c, err := NewClient("test-token", WithBaseURL(url))
+	require.NoError(t, err)
+
+	_, err = c.SendMessage(context.Background(), 1, "hi", nil)
+
+	require.Error(t, err)
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestRetryAfter_StopsWhenContextEnds(t *testing.T) {
+	url, calls := floodServer(t, 1, 1)
+	c, err := NewClient("test-token", WithBaseURL(url), WithRetryAfter(2*time.Second))
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	_, err = c.SendMessage(ctx, 1, "hi", nil)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.EqualValues(t, 1, calls.Load())
 }

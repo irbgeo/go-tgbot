@@ -268,3 +268,23 @@ type refundStarPaymentPayload struct {
 	UserID                  int64  `json:"user_id"`
 	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
 }
+
+// updateQueue holds the updates of one chat that wait for the one running
+// before them (Dispatcher).
+type updateQueue struct {
+	pending []Update
+}
+
+// formFile is one file part of a multipart upload.
+type formFile struct {
+	Field    string
+	Reader   io.Reader
+	Filename string
+}
+
+// apiRequest is one Bot API call, ready to send (and to send again).
+type apiRequest struct {
+	Method      string
+	ContentType string
+	Body        []byte
+}
