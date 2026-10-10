@@ -518,7 +518,7 @@ _, err := client.SendDocument(ctx, chatID, tgbot.InputFile{
 }, nil)
 ```
 
-Both `SendPhotoOptions` and `SendDocumentOptions` have the same fields:
+`SendPhotoOptions`, `SendDocumentOptions` and `SendVideoOptions` have the same fields:
 
 | Field       | Type     | Meaning                       |
 |-------------|----------|-------------------------------|
@@ -690,6 +690,7 @@ if d, ok := tgbot.RetryAfter(err); ok {
 | `AnswerCallback`      | Answer a button tap with no popup (shortcut). |
 | `SendPhoto`           | Send a photo.                                 |
 | `SendDocument`        | Send a document.                              |
+| `SendVideo`           | Send a video (same `InputFile` forms; `Message.Video.FileID` of a received video sends it again without an upload). |
 | `SetMyCommands`       | Set the bot's command list.                   |
 | `GetFile` / `DownloadFile` | Download a file a user sent.             |
 | `SendInvoice`         | Send an invoice (for Stars: `CurrencyStars`, empty provider token). |

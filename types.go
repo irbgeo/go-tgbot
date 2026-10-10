@@ -52,6 +52,7 @@ type Message struct {
 	Text              string             `json:"text"`
 	Caption           string             `json:"caption"`
 	Document          *Document          `json:"document"`
+	Video             *Video             `json:"video"`
 	SuccessfulPayment *SuccessfulPayment `json:"successful_payment"`
 }
 
@@ -61,6 +62,18 @@ type Document struct {
 	FileName string `json:"file_name"`
 	MimeType string `json:"mime_type"`
 	FileSize int64  `json:"file_size"`
+}
+
+// Video describes a video attached to a message. Send it again by its
+// FileID (SendVideo) without uploading it a second time.
+type Video struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	MimeType string `json:"mime_type"`
+	FileSize int64  `json:"file_size"`
+	Duration int    `json:"duration"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
 }
 
 // File is Telegram's file metadata, returned by GetFile. FilePath is only
@@ -180,6 +193,19 @@ type sendDocumentPayload struct {
 
 // SendDocumentOptions configures SendDocument.
 type SendDocumentOptions struct {
+	Caption   string
+	ParseMode string
+}
+
+type sendVideoPayload struct {
+	ChatID    int64  `json:"chat_id"`
+	Video     string `json:"video"`
+	Caption   string `json:"caption,omitempty"`
+	ParseMode string `json:"parse_mode,omitempty"`
+}
+
+// SendVideoOptions configures SendVideo.
+type SendVideoOptions struct {
 	Caption   string
 	ParseMode string
 }

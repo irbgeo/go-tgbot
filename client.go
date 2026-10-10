@@ -206,6 +206,41 @@ func (s *Client) SendDocument(ctx context.Context, chatID int64, doc InputFile, 
 	return doJSON[Message](ctx, s, "sendDocument", payload)
 }
 
+// SendVideo sends a video. InputFile can be FileID/URL or a new upload.
+func (s *Client) SendVideo(ctx context.Context, chatID int64, video InputFile, opts *SendVideoOptions) (Message, error) {
+	if video.Reader != nil {
+		fields := map[string]string{
+			"chat_id": fmt.Sprintf("%d", chatID),
+		}
+		if opts != nil {
+			if opts.Caption != "" {
+				fields["caption"] = opts.Caption
+			}
+			if opts.ParseMode != "" {
+				fields["parse_mode"] = opts.ParseMode
+			}
+		}
+		files := []formFile{{
+			Field:    "video",
+			Reader:   video.Reader,
+			Filename: video.Filename,
+		}}
+		return doMultipart[Message](ctx, s, "sendVideo", fields, files)
+	}
+	if video.String() == "" {
+		return Message{}, errors.New("telegram: video file_id or URL is required")
+	}
+	payload := sendVideoPayload{
+		ChatID: chatID,
+		Video:  video.String(),
+	}
+	if opts != nil {
+		payload.Caption = opts.Caption
+		payload.ParseMode = opts.ParseMode
+	}
+	return doJSON[Message](ctx, s, "sendVideo", payload)
+}
+
 // GetFile resolves a file_id to a short-lived download path — the first of
 // Telegram's two steps to retrieve a file (see DownloadFile for the second).
 func (s *Client) GetFile(ctx context.Context, fileID string) (string, error) {

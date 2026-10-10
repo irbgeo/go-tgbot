@@ -373,3 +373,67 @@ func TestRetryAfter_StopsWhenContextEnds(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.EqualValues(t, 1, calls.Load())
 }
+
+func TestMessage_UnmarshalsVideoField(t *testing.T) {
+	raw := `{"message_id":1,"date":0,"chat":{"id":1},"video":{"file_id":"vid123","file_name":"howto.mp4","mime_type":"video/mp4","file_size":4096,"duration":42,"width":720,"height":1280}}`
+
+	var m Message
+	require.NoError(t, json.Unmarshal([]byte(raw), &m))
+
+	require.NotNil(t, m.Video)
+	require.Equal(t, "vid123", m.Video.FileID)
+	require.Equal(t, "howto.mp4", m.Video.FileName)
+	require.Equal(t, "video/mp4", m.Video.MimeType)
+	require.Equal(t, int64(4096), m.Video.FileSize)
+	require.Equal(t, 42, m.Video.Duration)
+}
+
+func TestSendVideo_ByFileIDSendsCorrectRequestBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(t, r.URL.Path, "/sendVideo")
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, float64(100), body["chat_id"])
+		require.Equal(t, "vid123", body["video"])
+		require.Equal(t, "How to", body["caption"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":56,"date":0,"chat":{"id":100}}}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	msg, err := c.SendVideo(context.Background(), 100, InputFile{FileID: "vid123"}, &SendVideoOptions{Caption: "How to"})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(56), msg.MessageID)
+}
+
+func TestSendVideo_UploadsTheFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		require.Equal(t, "100", r.FormValue("chat_id"))
+		f, h, err := r.FormFile("video")
+		require.NoError(t, err)
+		defer f.Close()
+		require.Equal(t, "howto.mp4", h.Filename)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":57,"date":0,"chat":{"id":100}}}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	_, err = c.SendVideo(context.Background(), 100, InputFile{Reader: bytes.NewReader([]byte("mp4")), Filename: "howto.mp4"}, nil)
+
+	require.NoError(t, err)
+}
+
+func TestSendVideo_NeedsAFile(t *testing.T) {
+	c, err := NewClient("test-token")
+	require.NoError(t, err)
+
+	_, err = c.SendVideo(context.Background(), 100, InputFile{}, nil)
+
+	require.Error(t, err)
+}
