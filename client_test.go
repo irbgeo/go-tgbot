@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 
@@ -436,4 +437,35 @@ func TestSendVideo_NeedsAFile(t *testing.T) {
 	_, err = c.SendVideo(context.Background(), 100, InputFile{}, nil)
 
 	require.Error(t, err)
+}
+
+func TestGetStarTransactions_SendsPageAndParsesWithdrawal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.True(t, strings.HasSuffix(r.URL.Path, "/getStarTransactions"))
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		require.Equal(t, float64(100), body["offset"])
+		require.Equal(t, float64(50), body["limit"])
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"transactions":[
+			{"id":"a","amount":99,"date":1759300000,"source":{"type":"user","user":{"id":7,"is_bot":false,"first_name":"A"}}},
+			{"id":"b","amount":300,"date":1759400000,"receiver":{"type":"fragment","withdrawal_state":{"type":"succeeded","date":1759400100,"url":"https://x"}}}
+		]}}`))
+	}))
+	defer server.Close()
+	c, err := NewClient("test-token", WithBaseURL(server.URL))
+	require.NoError(t, err)
+
+	got, err := c.GetStarTransactions(context.Background(), 100, 50)
+
+	require.NoError(t, err)
+	require.Len(t, got.Transactions, 2)
+	require.Equal(t, "user", got.Transactions[0].Source.Type)
+	require.Equal(t, int64(7), got.Transactions[0].Source.User.ID)
+	require.Nil(t, got.Transactions[0].Receiver)
+	w := got.Transactions[1]
+	require.Equal(t, int64(300), w.Amount)
+	require.Equal(t, int64(1759400000), w.Date)
+	require.Equal(t, "fragment", w.Receiver.Type)
+	require.Equal(t, "succeeded", w.Receiver.WithdrawalState.Type)
 }

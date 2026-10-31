@@ -295,6 +295,59 @@ type refundStarPaymentPayload struct {
 	TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
 }
 
+type getStarTransactionsPayload struct {
+	Offset int `json:"offset,omitempty"`
+	Limit  int `json:"limit,omitempty"`
+}
+
+// StarTransactions is one page of GetStarTransactions.
+type StarTransactions struct {
+	Transactions []StarTransaction `json:"transactions"`
+}
+
+// StarTransaction is one Telegram Star transaction of the bot. Source is
+// set for incoming ones (a payment), Receiver for outgoing ones (a refund,
+// a withdrawal to Fragment).
+type StarTransaction struct {
+	ID             string              `json:"id"`
+	Amount         int64               `json:"amount"`
+	NanostarAmount int64               `json:"nanostar_amount,omitempty"`
+	Date           int64               `json:"date"`
+	Source         *TransactionPartner `json:"source,omitempty"`
+	Receiver       *TransactionPartner `json:"receiver,omitempty"`
+}
+
+// Transaction partner types this library names.
+const (
+	TransactionPartnerUser     = "user"
+	TransactionPartnerFragment = "fragment"
+)
+
+// TransactionPartner is the other side of a StarTransaction. Only the
+// fields this project needs; Type tells which ones are set.
+type TransactionPartner struct {
+	Type string `json:"type"`
+	// User is set when Type is "user".
+	User *User `json:"user,omitempty"`
+	// WithdrawalState is set when Type is "fragment".
+	WithdrawalState *RevenueWithdrawalState `json:"withdrawal_state,omitempty"`
+}
+
+// Withdrawal states of RevenueWithdrawalState.Type.
+const (
+	WithdrawalPending   = "pending"
+	WithdrawalSucceeded = "succeeded"
+	WithdrawalFailed    = "failed"
+)
+
+// RevenueWithdrawalState is the state of a withdrawal to Fragment.
+type RevenueWithdrawalState struct {
+	Type string `json:"type"`
+	// Date and URL are set when Type is "succeeded".
+	Date int64  `json:"date,omitempty"`
+	URL  string `json:"url,omitempty"`
+}
+
 // updateQueue holds the updates of one chat that wait for the one running
 // before them (Dispatcher).
 type updateQueue struct {

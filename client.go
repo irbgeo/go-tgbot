@@ -324,6 +324,15 @@ func (s *Client) RefundStarPayment(ctx context.Context, userID int64, telegramPa
 	})
 }
 
+// GetStarTransactions returns one page of the bot's Telegram Star
+// transactions, oldest first: offset skips that many, limit is 1–100.
+func (s *Client) GetStarTransactions(ctx context.Context, offset, limit int) (StarTransactions, error) {
+	return doJSON[StarTransactions](ctx, s, "getStarTransactions", getStarTransactionsPayload{
+		Offset: offset,
+		Limit:  limit,
+	})
+}
+
 // do sends the request. The bot token is part of every request URL, and
 // net/http puts that URL into its errors (*url.Error), so on failure the
 // token is replaced with "***" before the error reaches callers and logs.
